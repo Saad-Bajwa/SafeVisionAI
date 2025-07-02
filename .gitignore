@@ -1,0 +1,35 @@
+# .gitignore
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Build results
+bin/
+obj/
+
+# Rider
+.idea/
+
+# ASP.NET Secrets
+secrets.json
+*.db
+
+# Python Cache
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+
+# System files
+.DS_Store
+Thumbs.db
