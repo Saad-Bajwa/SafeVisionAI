@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using SafeVision_AI.API.Data;
+using SafeVision_AI.API.Hubs;
 using SafeVision_AI.API.Interfaces;
 using SafeVision_AI.API.Services;
 using SafeVisionAI.Core.Entities;
@@ -15,13 +17,14 @@ namespace SafeVision_AI.API.Controllers
     public class IncidentsController : ControllerBase
     {
         private readonly SafeVisionDbContext _db;
-
+        private readonly IHubContext<NotificationHub> _hubContext;
         private readonly IEmailNotificationService _emailNotificationService;
 
-        public IncidentsController(SafeVisionDbContext db, IEmailNotificationService emailNotificationService)
+        public IncidentsController(SafeVisionDbContext db, IEmailNotificationService emailNotificationService, IHubContext<NotificationHub> hubContext)
         {
             _db = db;
             _emailNotificationService = emailNotificationService;
+            _hubContext = hubContext;
         }
         [HttpGet("all")]
         public IActionResult GetAllIncidents()
@@ -134,12 +137,12 @@ namespace SafeVision_AI.API.Controllers
             if (dto == null)
                 return BadRequest(new ApiResponse<string> { Success = false, Message = "Invalid data" });
 
+            using var transaction = await _db.Database.BeginTransactionAsync();
             try
             {
                 Incident incident = new Incident();
                 incident.CameraId = dto.CameraId;
 
-                // Fix for CS0029: Parse the string to the IncidentType enum
                 if (Enum.TryParse<IncidentType>(dto.Type, out var incidentType))
                 {
                     incident.Type = incidentType;
@@ -164,7 +167,9 @@ namespace SafeVision_AI.API.Controllers
                 _db.Incidents.Add(incident);
                 await _db.SaveChangesAsync();
 
-                // Rule Engine: If critical or high → create alert
+                // Explicitly load the Camera navigation property
+                await _db.Entry(incident).Reference(i => i.Camera).LoadAsync();
+
                 if (incident.Severity == IncidentSeverity.Critical || incident.Severity == IncidentSeverity.High)
                 {
                     var alert = new IncidentAlert
@@ -177,6 +182,17 @@ namespace SafeVision_AI.API.Controllers
                     };
                     _db.IncidentAlerts.Add(alert);
                     await _db.SaveChangesAsync();
+
+                    await _hubContext.Clients.All.SendAsync("ReceiveAlert", new
+                    {
+                        IncidentId = incident.Id,
+                        Camera = incident.Camera.Name ?? "Default",
+                        Type = incident.Type.ToString(),
+                        Severity = incident.Severity.ToString(),
+                        TimeStamp = incident.DetectedAt,
+                        Location = incident.Camera.Location ?? "Default Location"
+                    });
+
                     var subject = $"[SafeVision AI] {incident.Type} Alert - {incident.Camera?.Location ?? "Unknown Location"}";
                     var body = EmailBodyService.GenerateAlertEmailBody(incident, alert);
                     var emailSent = await _emailNotificationService.SendEmail(alert.RecipientEmail, subject, body);
@@ -195,6 +211,8 @@ namespace SafeVision_AI.API.Controllers
                     await _db.SaveChangesAsync();
                 }
 
+                await transaction.CommitAsync();
+
                 return Ok(new ApiResponse<int>
                 {
                     Success = true,
@@ -204,6 +222,7 @@ namespace SafeVision_AI.API.Controllers
             }
             catch (Exception ex)
             {
+                await transaction.RollbackAsync();
                 return StatusCode(500, new ApiResponse<string>
                 {
                     Success = false,
