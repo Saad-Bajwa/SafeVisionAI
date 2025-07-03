@@ -29,7 +29,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Hubs\" />
     <Folder Include="BackgroundServices\" />
     <Folder Include="Middlewares\" />
     <Folder Include="Extensions\" />

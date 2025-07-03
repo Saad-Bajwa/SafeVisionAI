@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SafeVision_AI.API.Data;
+using SafeVision_AI.API.Interfaces;
+using SafeVision_AI.API.Services;
 using SafeVisionAI.Core.Entities;
 using SafeVisionAI.Core.Enums;
 using SafeVisionAI.Infrastructure.DTOs;
@@ -13,9 +15,13 @@ namespace SafeVision_AI.API.Controllers
     public class IncidentsController : ControllerBase
     {
         private readonly SafeVisionDbContext _db;
-        public IncidentsController(SafeVisionDbContext db)
+
+        private readonly IEmailNotificationService _emailNotificationService;
+
+        public IncidentsController(SafeVisionDbContext db, IEmailNotificationService emailNotificationService)
         {
             _db = db;
+            _emailNotificationService = emailNotificationService;
         }
         [HttpGet("all")]
         public IActionResult GetAllIncidents()
@@ -157,6 +163,37 @@ namespace SafeVision_AI.API.Controllers
 
                 _db.Incidents.Add(incident);
                 await _db.SaveChangesAsync();
+
+                // Rule Engine: If critical or high → create alert
+                if (incident.Severity == IncidentSeverity.Critical || incident.Severity == IncidentSeverity.High)
+                {
+                    var alert = new IncidentAlert
+                    {
+                        IncidentId = incident.Id,
+                        RecipientEmail = "saadse786@gmail.com",
+                        RecipientPhone = "03002231675",
+                        Status = AlertStatus.Pending,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _db.IncidentAlerts.Add(alert);
+                    await _db.SaveChangesAsync();
+                    var subject = $"[SafeVision AI] {incident.Type} Alert - {incident.Camera?.Location ?? "Unknown Location"}";
+                    var body = EmailBodyService.GenerateAlertEmailBody(incident, alert);
+                    var emailSent = await _emailNotificationService.SendEmail(alert.RecipientEmail, subject, body);
+                    if (emailSent)
+                    {
+                        alert.Status = AlertStatus.Sent;
+                        alert.SentAt = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        alert.Status = AlertStatus.Failed;
+                        alert.ErrorMessage = "Email sending failed";
+                    }
+
+                    _db.Entry(alert).State = EntityState.Modified;
+                    await _db.SaveChangesAsync();
+                }
 
                 return Ok(new ApiResponse<int>
                 {

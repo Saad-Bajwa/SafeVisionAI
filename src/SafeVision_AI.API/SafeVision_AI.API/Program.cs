@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SafeVision_AI.API.Data;
+using SafeVision_AI.API.Hubs;
 using SafeVision_AI.API.Interfaces;
 using SafeVision_AI.API.Services;
 
@@ -16,6 +17,7 @@ builder.Services.AddDbContext<SafeVisionDbContext>(options =>
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddSignalR();
 
 //Custom Services
 builder.Services.AddTransient<IEmailNotificationService, EmailNotificationService>();
@@ -37,5 +39,7 @@ app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapControllers();
+//Custom Pipelines
+app.MapHub<NotificationHub>("/notificationHub");
 
 app.Run();
